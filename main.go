@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/nats-io/nats.go"
 	messaging "github.com/sahilrana7582/go-messaging/nats"
 )
 
@@ -27,13 +28,14 @@ func main() {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
-	err = client.Subscribe("orders.created", func(data []byte) {
-		fmt.Printf("Received Data: %s\n", string(data))
+	sub, err := client.Subscribe("orders.*", func(msg *nats.Msg) {
+		fmt.Printf("Received on %s: %s\n", msg.Subject, string(msg.Data))
 		wg.Done()
 	})
 	if err != nil {
 		log.Fatalf("failed to subscribe: %v", err)
 	}
+	defer sub.Unsubscribe()
 
 	log.Println("NATS client initialized successfully")
 

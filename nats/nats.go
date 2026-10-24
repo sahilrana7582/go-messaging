@@ -2,6 +2,7 @@ package nats
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
@@ -14,7 +15,8 @@ type Config struct {
 }
 
 type Client struct {
-	conn *natsgo.Conn
+	conn   *natsgo.Conn
+	closed chan struct{}
 }
 
 func New(cfg Config) (*Client, error) {
@@ -25,6 +27,8 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Name == "" {
 		return nil, errors.New("nats: client name cannot be empty")
 	}
+
+	closed := make(chan struct{})
 
 	conn, err := natsgo.Connect(
 		cfg.URL,
@@ -44,6 +48,7 @@ func New(cfg Config) (*Client, error) {
 		}),
 		natsgo.ClosedHandler(func(c *natsgo.Conn) {
 			log.Printf("nats: connection closed: %v", c.LastError())
+			close(closed)
 		}),
 		natsgo.ConnectHandler(func(c *natsgo.Conn) {
 			log.Printf("nats: connected to %s", c.ConnectedUrl())
@@ -54,15 +59,26 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	return &Client{
-		conn: conn,
+		conn:   conn,
+		closed: closed,
 	}, nil
 }
 
+// Close drains the connection: in-flight and pending messages are handled
+// and buffered publishes are flushed before it closes. It blocks until the
+// connection is closed, so do not call it from inside a message handler.
 func (c *Client) Close() error {
 	if c == nil || c.conn == nil {
 		return nil
 	}
 
-	c.conn.Close()
+	if err := c.conn.Drain(); err != nil {
+		if errors.Is(err, natsgo.ErrConnectionClosed) {
+			return nil
+		}
+		return fmt.Errorf("nats: drain: %w", err)
+	}
+
+	<-c.closed
 	return nil
 }

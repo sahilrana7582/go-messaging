@@ -22,10 +22,6 @@ func (c *Client) Publish(subject string, data []byte) error {
 		return errors.New("nats: message data cannot be empty")
 	}
 
-	if c.conn.IsClosed() || !c.conn.IsConnected() {
-		return errors.New("nats: connection is closed")
-	}
-
 	if err := c.conn.Publish(subject, data); err != nil {
 		return fmt.Errorf("nats: publish to subject %q: %w", subject, err)
 	}
