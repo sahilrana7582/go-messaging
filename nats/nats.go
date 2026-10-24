@@ -1,69 +1,68 @@
 package nats
 
 import (
+	"errors"
 	"log"
-	"os"
-	"sync"
 	"time"
 
-	"github.com/nats-io/nats.go"
+	natsgo "github.com/nats-io/nats.go"
 )
 
-var (
-	natsServerConn *NatsServer
-	natsOnce       sync.Once
-)
-
-type NatsServer struct {
-	nats *nats.Conn
-
-	js     nats.JetStreamContext
-	jsOnce sync.Once
-	jsErr  error
+type Config struct {
+	URL  string
+	Name string
 }
 
-func initialize(url, clientName string) (*NatsServer, error) {
-	natsConn, err := nats.Connect(url,
-		nats.Name(clientName),
-		nats.MaxReconnects(-1),
-		nats.ReconnectWait(3*time.Second),
-		nats.ReconnectJitter(500*time.Millisecond, 2*time.Second),
-		nats.RetryOnFailedConnect(true),
-		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
-			log.Printf("nats: disconnected, reconnecting: %v", err)
+type Client struct {
+	conn *natsgo.Conn
+}
+
+func New(cfg Config) (*Client, error) {
+	if cfg.URL == "" {
+		cfg.URL = natsgo.DefaultURL
+	}
+
+	if cfg.Name == "" {
+		return nil, errors.New("nats: client name cannot be empty")
+	}
+
+	conn, err := natsgo.Connect(
+		cfg.URL,
+		natsgo.Name(cfg.Name),
+		natsgo.MaxReconnects(-1),
+		natsgo.ReconnectWait(3*time.Second),
+		natsgo.ReconnectJitter(
+			500*time.Millisecond,
+			2*time.Second,
+		),
+		natsgo.RetryOnFailedConnect(true),
+		natsgo.DisconnectErrHandler(func(_ *natsgo.Conn, err error) {
+			log.Printf("nats: disconnected: %v", err)
 		}),
-		nats.ReconnectHandler(func(c *nats.Conn) {
+		natsgo.ReconnectHandler(func(c *natsgo.Conn) {
 			log.Printf("nats: reconnected to %s", c.ConnectedUrl())
 		}),
-		nats.ClosedHandler(func(c *nats.Conn) {
+		natsgo.ClosedHandler(func(c *natsgo.Conn) {
 			log.Printf("nats: connection closed: %v", c.LastError())
 		}),
-		nats.ConnectHandler(func(c *nats.Conn) {
-			log.Printf("Trying to connect for: Url: %q, Client: %q", url, clientName)
+		natsgo.ConnectHandler(func(c *natsgo.Conn) {
+			log.Printf("nats: connected to %s", c.ConnectedUrl())
 		}),
 	)
-
 	if err != nil {
 		return nil, err
 	}
 
-	return &NatsServer{nats: natsConn}, nil
+	return &Client{
+		conn: conn,
+	}, nil
 }
 
-func GetNatsServer(clientName string) *NatsServer {
-	natsOnce.Do(func() {
-		natsURL := os.Getenv("NATS_URL")
-		if natsURL == "" {
-			natsURL = nats.DefaultURL
-		}
+func (c *Client) Close() error {
+	if c == nil || c.conn == nil {
+		return nil
+	}
 
-		server, err := initialize(natsURL, clientName)
-		if err != nil {
-			panic(err)
-		}
-
-		natsServerConn = server
-	})
-
-	return natsServerConn
+	c.conn.Close()
+	return nil
 }
